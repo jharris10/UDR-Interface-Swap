@@ -15,8 +15,7 @@
     Example:  "*/30 * * * * *" to run on multiples of 30 seconds
     Example:  "0 */5 * * * *" to run on multiples of 5 minutes on the 0-second mark
     - Set script variables below
-    - Add additional SwitchRouteTable entries in code block if needed
-
+    
     Note:  $monitor = "VMStatus" or $monitor = "TCPPort" like examples here
 
     $monitor = "VMStatus"
@@ -39,8 +38,8 @@
 
 $vmFW1Name = 'Fw2'              # Set the Name of the primary firewall
 $vmFW2Name = 'Fw3'              # Set the Name of the secondaryfirewall
-$Fw1RGName = 'udr-change'       # Set the Vnet that contains the firewalls and route tables
-$Fw2RGName = 'udr-change'       # Set the Vnet that contains the firewalls and route tables
+$Fw1RGName = 'udr-change'       # Set the ResourceGroup that contains Fw1
+$Fw2RGName = 'udr-change'       # Set the ResourceGroup that contains Fw2
 
 
 <#
@@ -137,7 +136,6 @@ function Failover
         }
         elseif($routeName.NextHopIpAddress -eq $PrimaryInts[$i])
         {
-          #updateroutetable $routeName $table $fwbInt1 
           Set-AzureRmRouteConfig -Name $routeName.Name  -NextHopType VirtualAppliance -RouteTable $table -AddressPrefix $routeName.AddressPrefix -NextHopIpAddress $SecondaryInts[$i] 
         }
       }
@@ -179,7 +177,6 @@ function Failback
         }
         elseif($routeName.NextHopIpAddress -eq $SecondaryInts[$i])
         {
-          #updateroutetable $routeName $table $fwbInt1 
           Set-AzureRmRouteConfig -Name $routeName.Name  -NextHopType VirtualAppliance -RouteTable $table -AddressPrefix $routeName.AddressPrefix -NextHopIpAddress $PrimaryInts[$i]
         }  
       }  
@@ -222,7 +219,6 @@ Function getfwinterfaces
   }
 }
 
-#Write-Output "Got Interface IPs $Global:PrimaryInts $Global:SecondaryInts
 
 <#
     #**************************************************************
