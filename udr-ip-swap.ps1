@@ -226,13 +226,14 @@ Function getfwinterfaces
     #**************************************************************
 
     # Set Service Principal Credentials and establish your Azure RM Context
-    # SP_PASSWORD, SP_USERNAME, TENANTID are app settings
+    # SP_PASSWORD, SP_USERNAME, TENANTID, SUBSCRIPTIONID are app settings
 #>
 
 
  $password = ConvertTo-SecureString $env:SP_PASSWORD -AsPlainText -Force
  $credential = New-Object System.Management.Automation.PSCredential ($env:SP_USERNAME, $password)
- Add-AzureRmAccount -ServicePrincipal -Tenant $env:TENANTID -Credential $credential
+ Add-AzureRmAccount  -Tenant $env:TENANTID -Credential $credential -SubscriptionId $env:SUBSCRIPTIONID
+
  $context = Get-AzureRmContext
  Set-AzureRmContext -Context $context
 
