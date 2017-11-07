@@ -41,6 +41,17 @@ $vmFW2Name = 'Fw3'              # Set the Name of the secondaryfirewall
 $Fw1RGName = 'udr-change'       # Set the ResourceGroup that contains Fw1
 $Fw2RGName = 'udr-change'       # Set the ResourceGroup that contains Fw2
 
+<# Set the subscription that contains the ResourceGroups for the firewall
+Optional - Set the default SubscriptionID that contains the resource groups defined above.
+If a value is set then the script will also search for other subscriptionIDs associcated with 
+the account that the function runs with.   If no value is set then the script will assume only 
+one subscription is linked to the account. 
+
+$defaultsubscriptionID = ''
+
+#>
+
+$defaultsubscriptionID = '' 
 
 <#
     Set the parameter $monitor to  "VMStatus" if the current state 
@@ -111,28 +122,30 @@ Function Test-TCP-Port ($server, $port)
     The firewall will find all route tables within the resource group.
     The route tables are stored in an array.
     Iterate of the routing tables looking to entries that match any of the 
-    primary firewalls interfaces ($Global:PrimaryInts).  If a match is found
-    Substitute the current IP for the secondary firewall IP ($Global:SecondaryInts)
+    primary firewalls interfaces ($Script:PrimaryInts).  If a match is found
+    Substitute the current IP for the secondary firewall IP ($Script:SecondaryInts)
 #>
 
-function Failover
-{
+function Failover 
+  {
+  foreach ($subscriptionID in $Script:listofsubscriptionIDs){
+  Set-AzureRmContext -SubscriptionId $subscriptionID
   $rtable = @()
   $res = Find-AzureRmResource -ResourceType microsoft.network/routetables
 
   foreach ($rtable in $res)
-  {
-    $table = Get-AzureRmRouteTable -ResourceGroupName $rtable.ResourceGroupName -Name $rtable.name
-  
-    $jobs = @()
-    foreach ($routeName in $table.Routes)
     {
+    $table = Get-AzureRmRouteTable -ResourceGroupName $rtable.ResourceGroupName -Name $rtable.name
+    foreach ($routeName in $table.Routes){
+      Write-Output -InputObject "Updating route table  "
+      Write-Output -InputObject $rtable.name
+
       for ($i = 0; $i -lt $PrimaryInts.count; $i++)
       {
         if($routeName.NextHopIpAddress -eq $SecondaryInts[$i])
         {
           Write-Output -InputObject 'Already on Secondary FW' 
-          return
+          
         }
         elseif($routeName.NextHopIpAddress -eq $PrimaryInts[$i])
         {
@@ -140,12 +153,14 @@ function Failover
         }
       }
     }
+  
 
     $UpdateTable = [scriptblock]{param($table) Set-AzureRmRouteTable -RouteTable $table}
 
     &$UpdateTable $table 
 
   }
+}
 }
 
 
@@ -154,11 +169,12 @@ function Failover
     The firewall will find all route tables within the resource group.
     The route tables are stored in an array.
     Iterate of the routing tables looking to entries that match any of the 
-    secondary firewall interfaces ($Global:SecondaryInts).  If a match is found
-    Substitute the current IP for the secondary firewall IP ($Global:PrimaryInts)
+    secondary firewall interfaces ($Script:SecondaryInts).  If a match is found
+    Substitute the current IP for the secondary firewall IP ($Script:PrimaryInts)
 #>
-function Failback
-{
+function Failback {
+  foreach ($subscriptionID in $Script:listofsubscriptionIDs){
+  Set-AzureRmContext -SubscriptionId $subscriptionID
   $res = Find-AzureRmResource -ResourceType microsoft.network/routetables
 
   foreach ($rtable in $res)
@@ -168,12 +184,14 @@ function Failback
 
     foreach ($routeName in $table.Routes)
     {
+      Write-Output -InputObject "Updating route table  "
+      Write-Output -InputObject $rtable.name
       for ($i = 0; $i -lt $PrimaryInts.count; $i++)
       {
         if($routeName.NextHopIpAddress -eq $PrimaryInts[$i])
         {
           Write-Output -InputObject 'Already on Primary FW' 
-          return
+        
         }
         elseif($routeName.NextHopIpAddress -eq $SecondaryInts[$i])
         {
@@ -186,6 +204,7 @@ function Failback
 
     &$UpdateTable $table  
   }
+}
 }
 
 
@@ -209,18 +228,24 @@ Function getfwinterfaces
       $prv = $nic.IpConfigurations | Select-Object -ExpandProperty PrivateIpAddress  
       if ($VM.Name -eq $vmFW1Name)
       {
-        $Global:PrimaryInts += $prv
+        $Script:PrimaryInts += $prv
       }
       elseif($VM.Name -eq $vmFW2Name)
       {
-        $Global:SecondaryInts += $prv
+        $Script:SecondaryInts += $prv
       }
     }
   }
 }
 
+Function getallsubscriptions {
+  $subs = Get-AzureRmContext
+  foreach ($sub in $subs){
+    $Script:listofsubscriptionIDs += $sub.Subscription.Id
+  }
+}
 
-<#
+
     #**************************************************************
     #                      Main Code Block                            
     #**************************************************************
@@ -230,16 +255,23 @@ Function getfwinterfaces
 #>
 
 
- $password = ConvertTo-SecureString $env:SP_PASSWORD -AsPlainText -Force
- $credential = New-Object System.Management.Automation.PSCredential ($env:SP_USERNAME, $password)
- Add-AzureRmAccount  -Tenant $env:TENANTID -Credential $credential -SubscriptionId $env:SUBSCRIPTIONID
+$password = ConvertTo-SecureString $env:SP_PASSWORD -AsPlainText -Force
+$credential = New-Object System.Management.Automation.PSCredential ($env:SP_USERNAME, $password)
+Add-AzureRmAccount  -Tenant $env:TENANTID -Credential $credential -SubscriptionId $env:SUBSCRIPTIONID
 
- $context = Get-AzureRmContext
- Set-AzureRmContext -Context $context
+$context = Get-AzureRmContext
+Set-AzureRmContext -Context $context
 
+<#
+Use Login-AzureRmAccount if testing from a local machine
+Use $env:SP_PASSWORD and $env:SP_USERNAME if used in an Azure Function
+Login-AzureRmAccount
+#>
 
-$Global:PrimaryInts = @()
-$Global:SecondaryInts = @()
+$Script:PrimaryInts = @()
+$Script:SecondaryInts = @()
+$Script:listofsubscriptionIDs = @()
+
 
 
 # Check firewall status $intTries with $intSleep between tries
@@ -248,6 +280,7 @@ $ctrFW2 = 0
 $FW2Down = $True
 $FW1Down = $True
 $vms = Get-AzureRmVM
+getallsubscriptions
 getfwinterfaces
 For ($ctr = 1; $ctr -le $intTries; $ctr++)
 {
@@ -316,5 +349,4 @@ else
   #log both FW are up
   Write-Output -InputObject 'Both FW1 and FW2 Up - No action required'
 }
-
 
