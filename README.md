@@ -1,7 +1,7 @@
 # UDR-Interface-Swap
 Powershell Script to modify the next hop for route tables.   Provides HA failover for PANW firewalls
 
-The script runs as an Azure function either within your private VPC (App Service Plan) or on Azure hosted services outside your VNET.
+The script runs as an Azure function either within your private VPC (App Service Plan) or on Azure hosted services (Consumption based) outside your VNET.
 
 The script will monitor either the "running" state of the Paloaltonetworks firewalls or perform path monitoring via TCP probes to determine the health of the firewalls. 
 
