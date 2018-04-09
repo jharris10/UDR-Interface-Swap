@@ -40,8 +40,7 @@ $vmFW1Name = 'VM-FW1'              # Set the Name of the primary firewall
 $vmFW2Name = 'VM-FW2'              # Set the Name of the secondaryfirewall
 $Fw1RGName = 'fwhademo'       # Set the ResourceGroup that contains Fw1
 $Fw2RGName = 'fwhademo'       # Set the ResourceGroup that contains Fw2
-$failoverMode ='secondary-int'
-#$failoverMode = 'route-table'
+
 
 <# Set the subscription that contains the ResourceGroups for the firewall
 Optional - Set the default SubscriptionID that contains the resource groups defined above.
@@ -53,7 +52,7 @@ $defaultsubscriptionID = ''
 
 #>
 
-$defaultsubscriptionID = '78ba968c-2b70-4d43-a121-17bb150d1d65' 
+$defaultsubscriptionID = '' 
 
 <#
     Set the parameter $monitor to  "VMStatus" if the current state 
@@ -66,9 +65,26 @@ $defaultsubscriptionID = '78ba968c-2b70-4d43-a121-17bb150d1d65'
 #>
 $monitor = 'VMStatus'
 
-#**************************************************************
-#    The parameters below are required if using "TCPPort" mode
-#**************************************************************
+<#
+    Set the failover method.  Secondary-int will move the secondary ip 
+    from the primary firewall to the secondary which does not require any 
+    modification to routing tables so will result in faster failover times 
+    when multiple route tables are required. 
+    
+    Options for $failoverMode are 'secondary-int' and 'route-table'
+    
+   
+    $Script:IpconfigName is the IPconfiguration Name for the secondary IP address
+#>
+$failoverMode ='secondary-int'
+#$failoverMode = 'route-table'
+$Script:IpconfigName = ''
+
+<#
+    TCPPort monitoring is most applicable when the azure function is deployed within
+    the VNET (App Service Plan) as the azure source IP resides inside the VNET.  If deploying
+    using a consumption model use VMStatus instead
+#>
 
 $tcpFW1Server = 'www.microsoft.com'   # Hostname of the site to be monitored if using "TCPPort"
 $tcpFW1Port = 80
@@ -225,13 +241,15 @@ else {
   Write-Output -InputObject "No failovermode specified in parameter failoverMode" 
   }
 }
-
+<#
+     FW1secondaryIpconfig and FW1Nics both are arrays that we index through when moving the secondary IP address
+#>
 function moveToFW2 {
     for ($i = 0; $i -lt $Fw1Nics.count; $i++)
         {
         if ($Script:FW1secondaryIpconfig[$i] -ne $Null)
             {
-            Remove-AzureRmNetworkInterfaceIpConfig -Name Trust-vrrp -NetworkInterface $Script:Fw1Nics[$i]
+            Remove-AzureRmNetworkInterfaceIpConfig -Name $Script:IpconfigName -NetworkInterface $Script:Fw1Nics[$i]
             Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw1Nics[$i]
 
             Add-AzureRmNetworkInterfaceIpConfig -Name $Script:ipconfigname -NetworkInterface $Script:Fw2Nics[$i] -PrivateIpAddress $Script:FW1secondaryIpconfig[$i] -SubnetId $Script:Fw2Nics[$i].IpConfigurations[0].Subnet.Id
@@ -239,13 +257,15 @@ function moveToFW2 {
             }
         }
 }
-
+<#
+     FW1secondaryIpconfig and FW1Nics both are arrays that we index through when moving the secondary IP address
+#>
 function moveToFW1 {
     for ($i = 0; $i -lt $Fw2Nics.count; $i++)
         {
         if ($Script:FW2secondaryIpconfig[$i] -ne $Null)
             {
-            Remove-AzureRmNetworkInterfaceIpConfig -Name Trust-vrrp -NetworkInterface $Script:Fw2Nics[$i]
+            Remove-AzureRmNetworkInterfaceIpConfig -Name $Script:IpconfigName -NetworkInterface $Script:Fw2Nics[$i]
             Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw2Nics[$i]
 
             Add-AzureRmNetworkInterfaceIpConfig -Name $Script:ipconfigname -NetworkInterface $Script:Fw1Nics[$i] -PrivateIpAddress $Script:FW2secondaryIpconfig[$i] -SubnetId $Script:Fw1Nics[$i].IpConfigurations[0].Subnet.Id
@@ -254,7 +274,7 @@ function moveToFW1 {
         }
 }
 <#
-    Find all the secondary ip addresses associated with a firewall instance and store them in an arry
+    Find all the secondary ip addresses associated with a firewall instance and store them in an array
 #>
 Function getsecondaryipconfig {
   $nics = Get-AzureRmNetworkInterface | Where-Object -Property VirtualMachine -NE -Value $null  #skip Nics with no VM
