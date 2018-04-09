@@ -36,11 +36,24 @@
 
 
 
-$vmFW1Name = 'Fw2'              # Set the Name of the primary firewall
-$vmFW2Name = 'Fw3'              # Set the Name of the secondaryfirewall
-$Fw1RGName = 'udr-change'       # Set the ResourceGroup that contains Fw1
-$Fw2RGName = 'udr-change'       # Set the ResourceGroup that contains Fw2
+$vmFW1Name = 'VM-FW1'              # Set the Name of the primary firewall
+$vmFW2Name = 'VM-FW2'              # Set the Name of the secondaryfirewall
+$Fw1RGName = 'fwhademo'       # Set the ResourceGroup that contains Fw1
+$Fw2RGName = 'fwhademo'       # Set the ResourceGroup that contains Fw2
+$failoverMode ='secondary-int'
+#$failoverMode = 'route-table'
 
+<# Set the subscription that contains the ResourceGroups for the firewall
+Optional - Set the default SubscriptionID that contains the resource groups defined above.
+If a value is set then the script will also search for other subscriptionIDs associcated with 
+the account that the function runs with.   If no value is set then the script will assume only 
+one subscription is linked to the account. 
+
+$defaultsubscriptionID = ''
+
+#>
+
+$defaultsubscriptionID = '78ba968c-2b70-4d43-a121-17bb150d1d65' 
 
 <#
     Set the parameter $monitor to  "VMStatus" if the current state 
@@ -106,33 +119,37 @@ Function Test-TCP-Port ($server, $port)
   return $wait
 }
 
-
 <#
     The firewall will find all route tables within the resource group.
     The route tables are stored in an array.
     Iterate of the routing tables looking to entries that match any of the 
-    primary firewalls interfaces ($Global:PrimaryInts).  If a match is found
-    Substitute the current IP for the secondary firewall IP ($Global:SecondaryInts)
+    primary firewalls interfaces ($Script:PrimaryInts).  If a match is found
+    Substitute the current IP for the secondary firewall IP ($Script:SecondaryInts)
 #>
 
-function Failover
-{
+function Failover {
+if ($failoverMode -eq 'route-table')
+  {
+  
+
+  foreach ($subscriptionID in $Script:listofsubscriptionIDs){
+  Set-AzureRmContext -SubscriptionId $subscriptionID
   $rtable = @()
   $res = Find-AzureRmResource -ResourceType microsoft.network/routetables
 
   foreach ($rtable in $res)
-  {
-    $table = Get-AzureRmRouteTable -ResourceGroupName $rtable.ResourceGroupName -Name $rtable.name
-  
-    $jobs = @()
-    foreach ($routeName in $table.Routes)
     {
+    $table = Get-AzureRmRouteTable -ResourceGroupName $rtable.ResourceGroupName -Name $rtable.name
+    foreach ($routeName in $table.Routes){
+      Write-Output -InputObject "Updating route table  "
+      Write-Output -InputObject $rtable.name
+
       for ($i = 0; $i -lt $PrimaryInts.count; $i++)
       {
         if($routeName.NextHopIpAddress -eq $SecondaryInts[$i])
         {
           Write-Output -InputObject 'Already on Secondary FW' 
-          return
+          
         }
         elseif($routeName.NextHopIpAddress -eq $PrimaryInts[$i])
         {
@@ -140,25 +157,36 @@ function Failover
         }
       }
     }
+  
 
     $UpdateTable = [scriptblock]{param($table) Set-AzureRmRouteTable -RouteTable $table}
 
-    &$UpdateTable $table 
+    &$UpdateTable $table 
 
   }
 }
-
+}
+elseif ($failoverMode -eq 'secondary-int'){
+  moveToFW2
+  }
+else {
+  Write-Output -InputObject "No failovermode specified in parameter failoverMode" 
+  }
+}
 
 
 <#
     The firewall will find all route tables within the resource group.
     The route tables are stored in an array.
     Iterate of the routing tables looking to entries that match any of the 
-    secondary firewall interfaces ($Global:SecondaryInts).  If a match is found
-    Substitute the current IP for the secondary firewall IP ($Global:PrimaryInts)
+    secondary firewall interfaces ($Script:SecondaryInts).  If a match is found
+    Substitute the current IP for the secondary firewall IP ($Script:PrimaryInts)
 #>
-function Failback
+function Failback {
+if ($failoverMode -eq 'route-table')
 {
+  foreach ($subscriptionID in $Script:listofsubscriptionIDs){
+  Set-AzureRmContext -SubscriptionId $subscriptionID
   $res = Find-AzureRmResource -ResourceType microsoft.network/routetables
 
   foreach ($rtable in $res)
@@ -168,12 +196,14 @@ function Failback
 
     foreach ($routeName in $table.Routes)
     {
+      Write-Output -InputObject "Updating route table  "
+      Write-Output -InputObject $rtable.name
       for ($i = 0; $i -lt $PrimaryInts.count; $i++)
       {
         if($routeName.NextHopIpAddress -eq $PrimaryInts[$i])
         {
           Write-Output -InputObject 'Already on Primary FW' 
-          return
+        
         }
         elseif($routeName.NextHopIpAddress -eq $SecondaryInts[$i])
         {
@@ -184,16 +214,97 @@ function Failback
 
     $UpdateTable = [scriptblock]{param($table) Set-AzureRmRouteTable -RouteTable $table}
 
-    &$UpdateTable $table  
+    &$UpdateTable $table  
+  }
+}
+}
+elseif ($failoverMode -eq 'secondary-int'){
+  moveToFW1
+  }
+else {
+  Write-Output -InputObject "No failovermode specified in parameter failoverMode" 
   }
 }
 
+function moveToFW2 {
+    for ($i = 0; $i -lt $Fw1Nics.count; $i++)
+        {
+        if ($Script:FW1secondaryIpconfig[$i] -ne $Null)
+            {
+            Remove-AzureRmNetworkInterfaceIpConfig -Name Trust-vrrp -NetworkInterface $Script:Fw1Nics[$i]
+            Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw1Nics[$i]
 
+            Add-AzureRmNetworkInterfaceIpConfig -Name $Script:ipconfigname -NetworkInterface $Script:Fw2Nics[$i] -PrivateIpAddress $Script:FW1secondaryIpconfig[$i] -SubnetId $Script:Fw2Nics[$i].IpConfigurations[0].Subnet.Id
+            Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw2Nics[$i]
+            }
+        }
+}
+
+function moveToFW1 {
+    for ($i = 0; $i -lt $Fw2Nics.count; $i++)
+        {
+        if ($Script:FW2secondaryIpconfig[$i] -ne $Null)
+            {
+            Remove-AzureRmNetworkInterfaceIpConfig -Name Trust-vrrp -NetworkInterface $Script:Fw2Nics[$i]
+            Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw2Nics[$i]
+
+            Add-AzureRmNetworkInterfaceIpConfig -Name $Script:ipconfigname -NetworkInterface $Script:Fw1Nics[$i] -PrivateIpAddress $Script:FW2secondaryIpconfig[$i] -SubnetId $Script:Fw1Nics[$i].IpConfigurations[0].Subnet.Id
+            Set-AzureRmNetworkInterface  -NetworkInterface $Script:Fw1Nics[$i]
+            }
+        }
+}
+<#
+    Find all the secondary ip addresses associated with a firewall instance and store them in an arry
+#>
+Function getsecondaryipconfig {
+  $nics = Get-AzureRmNetworkInterface | Where-Object -Property VirtualMachine -NE -Value $null  #skip Nics with no VM
+  $vms1 = Get-AzureRmVM -Name $vmFW1Name -ResourceGroupName $Fw1RGName
+  $vms2 = Get-AzureRmVM -Name $vmFW2Name -ResourceGroupName $Fw2RGName
+  $i=0
+  foreach($nic in $nics)
+  {
+    <#
+        For each Nic look for the NIC ID if the firewall has the NIC bound to it then store the IP 
+        address in an array for later use.
+    #>
+    
+    if (($nic.VirtualMachine.Id -EQ $vms1.id) -Or ($nic.VirtualMachine.id -EQ $vms2.id)) 
+    {
+      $VM = $vms | Where-Object -Property Id -EQ -Value $nic.VirtualMachine.id
+      if ($VM.Name -eq $vmFW1Name)
+        {
+            $Script:Fw1Nics += $nic
+            if ($nic.IpConfigurations.count -eq 2)
+                {
+                $Script:Fw1IsPrimary
+                $Script:ipconfigname =$nic.IpConfigurations[1].Name
+                $prv = $nic.IpConfigurations[1] | Select-Object -ExpandProperty PrivateIpAddress  
+                $Script:FW1secondaryIpconfig += $prv
+                }
+            else {$Script:FW1secondaryIpconfig += $Null}
+        
+        }
+      elseif ($VM.Name -eq $vmFW2Name) 
+        {
+            $Script:Fw2Nics += $nic
+            if ($nic.IpConfigurations.count -eq 2)
+                {
+                $Script:Fw2IsPrimary
+                $Script:ipconfigname =$nic.IpConfigurations[1].Name
+                $prv = $nic.IpConfigurations[1] | Select-Object -ExpandProperty PrivateIpAddress  
+                $Script:FW2secondaryIpconfig += $prv
+                }
+            else {$Script:FW2secondaryIpconfig += $Null}
+        
+        }
+    }
+    }
+  
+}
 <#
     Find all the interfaces associated with a firewall instance and store them in an arry
 #>
-Function getfwinterfaces
-{
+Function getfwinterfaces {
   $nics = Get-AzureRmNetworkInterface | Where-Object -Property VirtualMachine -NE -Value $null  #skip Nics with no VM
   $vms1 = Get-AzureRmVM -Name $vmFW1Name -ResourceGroupName $Fw1RGName
   $vms2 = Get-AzureRmVM -Name $vmFW2Name -ResourceGroupName $Fw2RGName
@@ -206,21 +317,29 @@ Function getfwinterfaces
     if (($nic.VirtualMachine.Id -EQ $vms1.id) -Or ($nic.VirtualMachine.id -EQ $vms2.id)) 
     {
       $VM = $vms | Where-Object -Property Id -EQ -Value $nic.VirtualMachine.id
-      $prv = $nic.IpConfigurations | Select-Object -ExpandProperty PrivateIpAddress  
+      $prv = $nic.IpConfigurations[0] | Select-Object -ExpandProperty PrivateIpAddress  
       if ($VM.Name -eq $vmFW1Name)
       {
-        $Global:PrimaryInts += $prv
+        $Script:PrimaryInts += $prv
+        
       }
       elseif($VM.Name -eq $vmFW2Name)
       {
-        $Global:SecondaryInts += $prv
+        $Script:SecondaryInts += $prv
+       
       }
     }
   }
 }
+ 
+Function getallsubscriptions {
+  $subs = Get-AzureRmContext
+  foreach ($sub in $subs){
+    $Script:listofsubscriptionIDs += $sub.Subscription.Id
+  }
+}
 
 
-<#
     #**************************************************************
     #                      Main Code Block                            
     #**************************************************************
@@ -230,16 +349,29 @@ Function getfwinterfaces
 #>
 
 
- $password = ConvertTo-SecureString $env:SP_PASSWORD -AsPlainText -Force
- $credential = New-Object System.Management.Automation.PSCredential ($env:SP_USERNAME, $password)
- Add-AzureRmAccount  -Tenant $env:TENANTID -Credential $credential -SubscriptionId $env:SUBSCRIPTIONID
+<#$password = ConvertTo-SecureString $env:SP_PASSWORD -AsPlainText -Force
+$credential = New-Object System.Management.Automation.PSCredential ($env:SP_USERNAME, $password)
+Add-AzureRmAccount  -Tenant $env:TENANTID -Credential $credential -SubscriptionId $env:SUBSCRIPTIONID
 
- $context = Get-AzureRmContext
- Set-AzureRmContext -Context $context
+$context = Get-AzureRmContext
+Set-AzureRmContext -Context $context
+#>
 
+#Use Login-AzureRmAccount if testing from a local machine
+#Use $env:SP_PASSWORD and $env:SP_USERNAME if used in an Azure Function
+#Login-AzureRmAccount
+$context = Get-AzureRmContext
+Set-AzureRmContext -Context $context
 
-$Global:PrimaryInts = @()
-$Global:SecondaryInts = @()
+$Script:PrimaryInts = @()
+$Script:SecondaryInts = @()
+$Script:FW1secondaryIpconfig =@()
+$Script:FW2secondaryIpconfig =@()
+$Script:listofsubscriptionIDs = @()
+$Script:Fw1Nics = @()
+$Script:Fw2Nics = @()
+$Script:ipconfigname
+
 
 
 # Check firewall status $intTries with $intSleep between tries
@@ -248,7 +380,17 @@ $ctrFW2 = 0
 $FW2Down = $True
 $FW1Down = $True
 $vms = Get-AzureRmVM
-getfwinterfaces
+getallsubscriptions
+if ($failoverMode -eq 'route-table')
+  {
+  getfwinterfaces
+  }
+elseif ($failoverMode -eq 'secondary-int'){
+  getsecondaryipconfig
+  }
+else {
+  Write-Output -InputObject "No failovermode specified in parameter failoverMode" 
+  }
 For ($ctr = 1; $ctr -le $intTries; $ctr++)
 {
   # Test FW States based on VM PowerState (if specified)
@@ -316,5 +458,3 @@ else
   #log both FW are up
   Write-Output -InputObject 'Both FW1 and FW2 Up - No action required'
 }
-
-
