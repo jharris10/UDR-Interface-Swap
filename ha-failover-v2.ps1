@@ -1,5 +1,5 @@
 ﻿Write-Output -InputObject "PowerShell Timer trigger function executed at:$(Get-Date)"
-Write-Output -InputObject "PowerShell Timer trigger function executed at:$(Get-Date)"
+
 <#     
     Palo Alto Networks Traps PA-Azure Failover Example
     This script is an example for monitoring PA firewall status and performing
