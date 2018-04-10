@@ -62,9 +62,6 @@ $intTries = $env:FWTRIES          # Number of Firewall tests to try
 $intSleep = $env:FWDELAY          # Delay in seconds between tries
 
 
-
-
-
 <# Set the subscription that contains the ResourceGroups for the firewall
 Optional - Set the default SubscriptionID that contains the resource groups defined above.
 If a value is set then the script will also search for other subscriptionIDs associcated with 
@@ -99,20 +96,16 @@ $Script:IpconfigName = $env:IPCONFIGNAME
     the VNET (App Service Plan) as the azure source IP resides inside the VNET.  If deploying
     using a consumption model use VMStatus instead
 #>
+$tcpFW1Server = $env:FW1FQDN   # Hostname of the site to be monitored if using "TCPPort"
+$tcpFW1Port = $env:FW1PORT
+$tcpFW2Server = $env:FW2FQDN
+$tcpFW2Port = $env:FW2PORT
 
-$tcpFW1Server = 'www.microsoft.com'   # Hostname of the site to be monitored if using "TCPPort"
-$tcpFW1Port = 80
-$tcpFW2Server = 'www.novell.com'
-$tcpFW2Port = 443
 
-#**************************************************************
-#    Set the failover and failback behaviour for the firewalls
-#**************************************************************
-$FailOver = $True          # Trigger to enable fail-over to FW2 if FW1 drops when active
-$FailBack = $True          # Trigger to enable fail-back to FW1 if FW2 drops when active
+
 # FW is deemed down if ALL intTries fail with intSeconds between tries
-$intTries = 1          # Number of Firewall tests to try 
-$intSleep = 0          # Delay in seconds between tries
+$intTries = $env:FWTRIES          # Number of Firewall tests to try 
+$intSleep = $env:FWDELAY          # Delay in seconds between tries
 
 #**************************************************************
 #    Set the tag value for the route tables that will be modified
