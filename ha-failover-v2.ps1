@@ -115,6 +115,15 @@ $intTries = 1          # Number of Firewall tests to try
 $intSleep = 0          # Delay in seconds between tries
 
 #**************************************************************
+#    Set the tag value for the route tables that will be modified
+#    The tags should have a TagName:TagValue format
+#    The script assumes that the TagName is pan_ha_udr and that 
+#    the tagvalue is set to the value in the environment variable
+#    FWUDRTAG
+#**************************************************************
+
+$tagValue = $env:FWUDRTAG
+#**************************************************************
 #                Functions Code Block
 #**************************************************************
 
@@ -164,7 +173,7 @@ if ($failoverMode -eq 'route-table')
 
   foreach ($subscriptionID in $Script:listofsubscriptionIDs){
   Set-AzureRmContext -SubscriptionId $subscriptionID
-  $tagValue = $env:FWUDRTAG
+  
   $res = Find-AzureRmResource -TagName pan_ha_udr -TagValue $tagValue
 
   foreach ($rtable in $res)
@@ -217,7 +226,7 @@ if ($failoverMode -eq 'route-table')
 {
   foreach ($subscriptionID in $Script:listofsubscriptionIDs){
   Set-AzureRmContext -SubscriptionId $subscriptionID
-  $tagValue = $env:FWUDRTAG
+
   $res = Find-AzureRmResource -TagName pan_ha_udr -TagValue $tagValue
 
   foreach ($rtable in $res)
@@ -369,7 +378,12 @@ Function getfwinterfaces {
  
 Function getallsubscriptions {
   Write-Output -InputObject "Enumerating all subscriptins ..."
-  $Script:listofsubscriptionIDs = (Get-AzureRmSubscription).SubscriptionId
+  if ($defaultsubscriptionID -ne $Null) {
+    $Script:listofsubscriptionIDs = Get-AzureRmSubscription -subscriptionID $defaultsubscriptionID
+  }
+  else {
+  $Script:listofsubscriptionIDs = Get-AzureRmSubscription
+  }
   Write-Output -InputObject $Script:listofsubscriptionIDs
 
 }
